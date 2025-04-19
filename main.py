@@ -101,6 +101,9 @@ def main():
     parser.add_argument('--bitwidth', type=int, default=None, help='bitwidth for weights and activations')
     parser.add_argument('--teacher', type=str, default=None, help='teacher model') #'resnet101'
 
+    # Output
+    parser.add_argument('--output',"-o",type=str,default='./',help='path of output')
+
     args = parser.parse_args()
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -232,8 +235,12 @@ def main():
 
             # load the training set and test set
             train_loader, test_loader, if_weighted, subset, selection_args = load_subset(args, 0, dst_train, dst_test, mean, std, network)
-
-            criterion = nn.CrossEntropyLoss(reduction='none').to(args.device)
+            
+            # criterion for chestxray
+            if args.dataset == "chestxray":
+                criterion = nn.BCEWithLogitsLoss()
+            else:
+                criterion = nn.CrossEntropyLoss(reduction='none').to(args.device)
             criterion_kd = KD_loss.DistributionLoss()
 
             # Optimizer
@@ -322,7 +329,7 @@ def main():
                 else:
                     train(train_loader, network, criterion, model_teacher, optimizer, scheduler, epoch, args, rec, if_weighted=if_weighted)
 
-                # evaluate on validation set
+                # evaluate on validation set (updated)
                 if args.test_interval > 0 and (epoch + 1) % args.test_interval == 0:
                     prec1 = test(test_loader, network, criterion, epoch, args, rec)
 
@@ -371,6 +378,18 @@ def main():
             checkpoint = {}
             sleep(2)
 
+    # validate F1 using test set
+    val_loader = torch.utils.data.DataLoader(
+        dst_test,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.workers
+    )
+    print("\n🔍 Evaluating model...")
+    evaluate(model, val_loader, device=args.device)
+
+    
+
 def load_subset(args, current_epoch, dst_train, dst_test, mean, std, current_model):
     selection_args = dict(epochs=args.selection_epochs,
                             selection_method=args.uncertainty,
@@ -397,6 +416,12 @@ def load_subset(args, current_epoch, dst_train, dst_test, mean, std, current_mod
             transforms.ToTensor(),
             transforms.Normalize(mean, std)
         ])
+    elif args.dataset == "chestxray":
+        transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
 
     # Handle weighted subset
     if_weighted = "weights" in subset.keys()

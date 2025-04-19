@@ -1,0 +1,1 @@
+python main.py --fraction 0.1 --dataset chestxray --data_path D:\Academic\MS\2\big_data\project --num_exp 1 --workers 8 --optimizer Adam -se 5 --selection ACS --adaptive evonly --model ResNet18 --balance False --bitwidth 4 --lr 1.25e-3 --batch 256 --epochs 120 --data_update_epochs 10 --log ./logs/logs_4bit_10_cosine_acs_update10.txt

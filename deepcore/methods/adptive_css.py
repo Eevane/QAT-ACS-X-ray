@@ -57,6 +57,7 @@ class ACS(CoresetMethod):
                 im_size=(224, 224) if self.torchvision_pretrain else self.args.im_size).to(self.args.device)
         '''
         # load the full-precision model
+        self.fp_model = None
         if self.args.dataset == "ImageNet":
             self.fp_model = nets.__dict__[self.full_precision_model](
                 self.args.channel, self.num_classes, pretrained=self.torchvision_pretrain,
@@ -79,7 +80,8 @@ class ACS(CoresetMethod):
             self.fp_model = nets.nets_utils.MyDataParallel(self.fp_model).cuda()
         
         self.model.eval()
-        self.fp_model.eval()
+        if self.fp_model:
+            self.fp_model.eval()
 
         batch_loader = torch.utils.data.DataLoader(
             self.dst_train, batch_size=self.args.selection_batch, num_workers=self.args.workers,
@@ -114,21 +116,27 @@ class ACS(CoresetMethod):
 
                 if i % self.args.print_freq == 0:
                     print('| Current Sample [%3d/%3d]' % (i * self.args.selection_batch, sample_num))
-            
-                outputs = F.softmax(self.model(input.to(self.args.device)), dim=1)
 
-                targets_onehot = F.one_hot(targets.to(self.args.device), num_classes=self.num_classes)
-                outputs_fp = F.softmax(self.fp_model(input.to(self.args.device)), dim=1)
+                #targets_onehot = F.one_hot(targets.to(self.args.device), num_classes=self.num_classes)
+                
+                # modiefied output for multi-label
+                outputs = torch.sigmoid(self.model(input.to(self.args.device)))
+                if self.fp_model:
+                    outputs_fp = torch.sigmoid(self.fp_model(input.to(self.args.device)))
+                targets = targets.to(self.args.device).float()  # already multi-hot
 
-                el2n_score_disagree = torch.linalg.vector_norm(x=(outputs - outputs_fp),ord=2,dim=1)
-                el2n_score = torch.linalg.vector_norm(x=(outputs - targets_onehot),ord=2,dim=1)
+                el2n_score = torch.linalg.vector_norm(outputs - targets, ord=2, dim=1)
+                if self.fp_model:
+                    el2n_score_disagree = torch.linalg.vector_norm(outputs - outputs_fp, ord=2, dim=1)
 
                 #for j in range(len(targets_onehot)):
                 #    print("Targrts:{}, FP Prediction:{}, Quantized Prediction:{}".format(targets_onehot[j], outputs_fp[j], outputs[j],))
                 #for j in range(len(el2n_score_disagree)):
                 #    print("Disagreement Score:{}, EL2N Score:{}".format(el2n_score_disagree[j], el2n_score[j]))
-
-                self.norm_matrix[i * self.args.selection_batch:min((i + 1) * self.args.selection_batch, sample_num)] = (1-alpha)*el2n_score + alpha*el2n_score_disagree
+                if self.fp_model:
+                    self.norm_matrix[i * self.args.selection_batch:min((i + 1) * self.args.selection_batch, sample_num)] = (1-alpha)*el2n_score + alpha*el2n_score_disagree
+                else:
+                    self.norm_matrix[i * self.args.selection_batch:min((i + 1) * self.args.selection_batch, sample_num)] = el2n_score
 
                 #self.el2n[i * self.args.selection_batch:min((i + 1) * self.args.selection_batch, sample_num)] = el2n_score 
                 #self.disagreement[i * self.args.selection_batch:min((i + 1) * self.args.selection_batch, sample_num)] = el2n_score_disagree
